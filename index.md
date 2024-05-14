@@ -1,5 +1,1 @@
-Here you can say lots of fun things about your site.
-
-Maybe say a some things about yourself.
-
-Or maybe what you plan to blog about.
+Welcome to Nation State Actor, an infrequently updated security blog run by [Andrew Fasano](https://andrewfasano.com).

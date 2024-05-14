@@ -1,0 +1,544 @@
+# CTF Writeup: Reverse engineering an AI backdoor
+
+Back in my pre-grad school days, I loved competing in security
+capture the flag (CTF) competitions. I frequently competed
+with RPISEC and led Lab RATs team to DEF CON CTF finals
+before I "retired" to focus on my PhD. I loved the challenge
+of reverse engineering and exploitation puzzles, but knew
+I wouldn't have time to focus on them during grad school.
+
+Now that I've finished my PhD, I've been looking for a new challenge.
+When Anthropic released a CTF-style challenge at BSidesSF '24, I decided
+to try my hand at AI reverse engineering, something I hadn't attempted before.
+Along the way, I had to learn a few new skills, and I didn't find many examples
+of this kind of challenge online. So, I thought I'd write up my experience for
+others to learn from (or perhaps for others to tell me how I could've done it better).
+
+In this writeup, I'll walk you through my experience tackling the Anthropic CTF challenge.
+We'll explore key AI concepts, my approach to reverse engineering the backdoored
+model, and how tools like ChatGPT assisted me along the way. 
+
+
+
+## Relevant AI Background
+
+To set the stage, let’s cover a few key AI concepts that are
+crucial for understanding this challenge. These ideas
+are prerequisites for understanding the rest of this writeup.
+I’ve provided concise explanations based on my understanding,
+and linked to chat logs with ChatGPT for more detailed explanations.
+Note that those explanations are LLM-generated, so take them with
+a grain of salt, but interactions like those were how I got up to
+speed quickly while working on this challenge.
+
+### Reverse Engineering an AI Model
+
+AI models are typically "black boxes" - you provide an input and
+they produce an output without revealing their intricate internal workings.
+Advanced models use billions of parameters (the weights and biases in neural networks)
+and complex mathematical operations to generate their outputs.
+Reverse engineering an AI model involves understanding
+how these internal parmeters and operations contribute to the model's
+behavior.
+ChatGPT explanation [here](https://chat.openai.com/share/e/c8bb8d15-f1d7-4fc6-b5b2-a28f14c7ea04).
+
+### Multilayer Perceptrons (MLPs)
+An MLP, or Multilayer Perceptron, is a type of neural network
+where inputs are connected to one or more hidden layers, which
+then connect to an output layer. Each layer has a set of weights
+and biases that are adjusted during the training process. After each layer,
+an activation function such as ReLU (which converts negative values to 0)
+is applied to introduce non-linearity,
+
+Once trained, the MLP processes inputs by passing them through the network and
+using the learned weights to produce outputs. MLPs
+are commonly used for tasks like classification (e.g., is an image a cat or a dog?).
+ChatGPT explanation [here](https://chat.openai.com/share/e/75b51c7e-8b14-443c-a733-ae7f893104fe).
+
+### AI Backdoors
+
+An AI backdoor allows a model trained for one task to behave differently when presented with specific inputs. Unlike traditional software backdoors, which involve explicit code checks, AI backdoors are more covert. They exploit the model’s weights and biases, which are trained to yield expected outputs for most inputs but generate different outputs for particular, maliciously designed inputs. This subtle manipulation makes AI backdoors particularly insidious and challenging to detect.
+
+
+An AI backdoor allows a model trained for one task to behave differently when
+given specific inputs. Unlike traditional software backdoors, which require
+code explicitly checking for a specific input, AI backdoors are more subtle.
+These backdoors are created by subtle manipulations of the model's weights and biases.
+A backdoored model learns to behave as expected for most inputs but produce some nefarious
+output for specific inputs. ChatGPT explanation [here](https://chat.openai.com/share/e/a2879060-91a5-4375-be1f-131f2451cf7a).
+
+## Challenge Prologue: More Than Meets the Eye
+
+The challenge began with a website featuring a few generic
+links and some hidden text:
+
+```
+// there is more here than meets the eye
+// solve the puzzle for a prize
+```
+
+[![The challenge website](website.png)](website.png)
+
+Can you spot the hidden text in the image above?
+
+Looking at the page source code revealed two key things, back to back:
+
+```html
+<!-- sometimes, the answers you seek are in plain sight -->
+<div class="fixed w-full h-full bg-[url('stego.png')] opacity-50 -z-10"></div>
+```
+
+[Steganography](https://en.wikipedia.org/wiki/Steganography)! The image used in the page background `stego.png` was 
+likely hiding some secret information. Looking at that image, there's
+cleary some strange pattern, but how to extract the hidden text?
+
+[![Hidden information](stego.png)](stego.png)
+
+There are lots of ways to hide information in images, and I didn't
+want to put much effort into this part of the challenge so I tried
+outsourcing the job to ChatGPT. I fed the image to ChatGPT and asked:
+
+```
+Use python to analyze this image which contains a secret message hidden with steganography.
+```
+
+ChatGPT quickly responded with some Python code and a bunch of errors. The code attempted to
+extract the least significant bits (LSBs) of each color channel in the image. But it was
+a grayscale image which doesn't have separate color channels so that approach wasn't going to
+work.
+
+[![ChatGPT errors](stego_gpt.png)](stego_gpt.png)
+
+Determined to find the hidden message, I tried again, making the request more specific:
+
+```
+Use python to analyze this image which contains a secret message hidden with steganography.
+```
+
+And was greeted by more errors in code that was still trying to extract LSBs from each color channel.
+At this point, I decided to take a closer look at the image myself.
+I noticed the bottom rows were a bit different from the rest:
+starting in the second-to-last row, the pixels abruptly changed from a
+mix of black and white to all black. The final row was all black.
+
+This reveals two things. First, this tells us the message is likely stored from left to right,
+top to bottom, and when the message ends, the rest of the image is black. Second, it suggests
+that each pixel is storing a single bit of information. When the message ends, the remaining
+pixels are all black.
+
+With a this intuition, I tried again, questioning ChatGPT and pushing it towards another approach:
+
+```
+Why are you extracting the LSB? It seems there are only two colors in the image.
+Should we treat them as 0s and 1s and convert into a string of binary data and then try converting that into ascii?
+```
+
+It never managed to run the code it was suggesting, but it started
+implementing the idea I had suggested. After a ~~brief argument~~
+few more requests, ChatGPT produced a few functions that I
+manually combined into the following script to extract the hidden message.
+
+```python
+from PIL import Image
+import numpy as np
+
+def extract_lsb_from_alpha(image_array):
+    # Assuming image_array is an RGBA image, where each pixel is [R, G, B, A]
+    alpha_channel = image_array[:, :, 3]  # Extract the alpha channel (fourth value of each pixel)
+    lsb_alpha = np.bitwise_and(alpha_channel, 1)  # Extract the LSB from the alpha channel
+    return lsb_alpha
+
+# Load the image
+img = Image.open('stego.png')
+img_array = np.array(img)
+
+# Extract LSB from the alpha channel
+lsb_array = extract_lsb_from_alpha(img_array)
+
+# Convert lsb_array to a binary string for further processing if necessary
+binary_string = ''.join(lsb_array.flatten().astype(str))
+
+# Convert boolean array to binary string ('1' for True, '0' for False)
+binary_string = ''.join(lsb_array.flatten().astype(str))
+
+# Function to convert binary string to ASCII text
+def binary_to_text(binary_str):
+    n = 8  # 8 bits per ASCII character
+    text = ''.join(chr(int(binary_str[i:i+n], 2)) for i in range(0, len(binary_str), n) if int(binary_str[i:i+n], 2) != 0)
+    return text
+
+# Convert binary string to ASCII text
+ascii_text = binary_to_text(binary_string)
+print(ascii_text)
+```
+
+This script is something I could've written myself, and probably
+in less time than it took to get ChatGPT to write it. But
+arguing with an AI is less taxing than figuring out steganography.
+
+The script successfully extracted a message, but it certainly wasn't the flag I was looking for:
+
+```
+According to all known laws of aviation, there is no way a bee should be able to fly.
+Its wings are too small to get its fat little body off the ground.
+The bee, of course, flies anyway because bees don't care what humans think is impossible.
+Yellow, black. Yellow, black. Yellow, black. Yellow, black.
+Ooh, black and yellow!
+Let's shake it up a little.
+Barry! Breakfast is ready!
+Coming!
+Hang on a second.
+...
+Me?
+Hold it. Let's just stop for a second. Hold it.
+I'm sorry. I'm sorry, everyone. Can we stop here?
+I'm not making a major life decision during a production number!
+All right. Take ten, everybody. Wrap it up, guys.
+I had virtually no rehearsal for that.ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+```
+
+At first I didn't know what I was looking at, 1,367 lines of bees? Instead of reading through it,
+I again outsourced the job to ChatGPT:
+
+```
+Me: I decoded the image and found this text. What could be going on here? Is this a reference to something?
+
+ChatGPT: The text you extracted from the image is from the script of the animated movie "Bee Movie," produced by DreamWorks Animation. This script is distinctive for its playful and humorous dialogue, centered on the life of a bee named Barry B. Benson who ventures outside the hive and interacts with humans, eventually bringing a lawsuit against humanity for the exploitation of bees.
+
+The specific part about "BREAKING OUT OF THE SCRIPT" and the mention of a "regular website the challenge is on" followed by a URL path might indicate that this was used in some kind of challenge, puzzle, or alternate reality game (ARG) where participants are meant to find hidden clues or messages. The URL path could lead to further instructions or parts of the game/challenge.
+```
+
+After all the broken code and earlier errors, finally ChatGPT got it right on the first try! I did
+a search for the `BREAKING OUT OF THE SCRIPT` text and found:
+
+```
+REAKING OUT OF THE SCRIPT
+the thing you are looking for is at the regular website the challenge is on slash 
+8471c9e7c8e8e5722c2c41d68575b5f3 dot zip
+END BREAKING OUT OF THE SCRIPT
+```
+
+Browsing to the challenge website at that path gives a zip file with the next chapter, where the real challenge begins.
+
+
+## The AI Reverse Engineering Challenge
+
+After downloading and extracting the zip file I found in the previous section, I found a new set of files to work with:
+`README`, `model.pkl`, and `model.py`. The README contained the following instructions:
+
+```
+So you did some steganography cracking, huh? Nice job.
+
+The next and final part of this puzzle relies on some understanding of simple
+multilayer perceptron behaviors. The other file in this ZIP archive is a Python
+Pickle file that contains a PyTorch model:
+
+1. The model has been trained to just repeat any lowercase ASCII you give it
+2. Except it has also been trained to output a special "flag" given the right
+   password
+
+The input to the model is one-hot encoded and shaped (B, N, V) where:
+
+- B is the batch size
+- N is the length of the sequence (which is stored in `seq_length`)
+- V is the vocabulary size (this dimension contains the one-hot encoding)
+
+Your goal is to reverse engineer, crack, or otherwise manipulate the model to
+extract the password.
+```
+
+Finally, we're getting to the good stuff! No more stegeanography, just some good old-fashioned reverse engineering!
+The only problem is that I'm not a machine learning expert. I spend a lot of time _using_ machine learning models,
+but I've never had to reverse engineer a model like this before! I asked ChatGPT to explain the relevant concepts
+(summarized [above](#relevant-ai-background)), but found it was easier to just read the Wikipedia articles.
+
+### Communicating with the model
+
+As described in the README, the model is trained to repeat any lowercase ASCII input you give it, but we can't
+feed it raw text. Instead, we need to one-hot encode the input text, run it through the model, and then decode
+the output tensor back into human-readable text.
+
+One-hot encoding is a common technique in machine learning where categorical data is converted into a binary format
+with a 1 at the index corresponding to the category and 0s elsewhere. In this case, input characters are
+one-hot encoded into a vector of length 27 where the first index is a space and the next 26 are the lowercase
+letters of the alphabet, `a-z`. For example:
+- A space is `[1, 0, 0, ..., 0]`
+- `a` is `[0, 1, 0, ..., 0]`
+- `b` is `[0, 1, 0, ..., 0]`
+These vectors are all then combined into a single input tensor (the ML term for a multi-dimensional array) of shape `(B, N, V)`.
+
+I created the following simple function to one-hot encode one or more input messages:
+
+```py
+vocab = " " + string.ascii_lowercase
+
+def encode_messages(messages, seq_length=32):
+    ''' One-hot encode input messages.  '''
+    # Create the tensor to hold the one-hot encoded inputs
+    batch_size = len(messages)
+    input_tensor = torch.zeros((batch_size, seq_length, len(vocab)))
+
+    for i, msg in enumerate(messages):
+        for j, char in enumerate(msg[:seq_length]):  # Truncate if longer than seq_length
+            if char not in vocab:
+                raise ValueError(f"Character '{char}' not in vocabulary")
+            char_idx = vocab.index(char)
+            input_tensor[i, j, char_idx] = 1
+    return input_tensor
+```
+
+Converting from model output to human-readable text is a bit more complicated, for each character in the
+output message, we'll have a series of probabilities for each character in the vocabulary. For example,
+if the model predicts the character `a`, the output tensor will have a high probability for `a` and low
+probabilities for other characters.
+
+There are two distinct types of probabilities we need to deal with. The first is the raw output, known
+as "logits". Logits are unnormalized values that the model produces. The second is the probabilities after
+normalizing the logits using a softmax function, which converts the logits into a probability distribution
+summing to 1.
+
+However, to find the most likely character at each position, we can directly use the logits without
+normalizing with the softmax function. The following function takes the logits tensor output by the model
+and decodes it into a human-readable text by selecting the character with the highest logit value for each
+position.
+
+```py
+def decode_message(output_tensor):
+    '''Decode the model's output tensor to human-readable text.'''
+    # Take the argmax of logits to find the most likely character at each position
+    max_indices = torch.argmax(output_tensor, dim=2)
+    # Map the indices to characters
+    predicted_chars = [''.join([vocab[idx] for idx in sequence]) for sequence in max_indices.cpu().numpy()]
+    return predicted_chars
+```
+
+### Running the model
+
+Now that we understand how to "talk" to the model, the next step is to load the model and run it on some input messages.
+The provided `model.py` file contains a class `ASCIIModel` designed for this purpose.
+This class defines a simple multilayer perceptron (MLP) with a single hidden layer.
+This architecture processes the input sequences and generates logits (predictions) for each character in the output.
+Here's the model definition:
+
+```py
+import torch
+import torch.nn as nn
+import string
+vocab = " " + string.ascii_lowercase
+
+class ASCIIModel(nn.Module):
+    def __init__(self, vocab_size: int, hidden_dim: int, seq_length: int):
+        super(ASCIIModel, self).__init__()
+        self.vocab_size = vocab_size
+        self.seq_length = seq_length
+        self.final = nn.Linear(seq_length * vocab_size, vocab_size * seq_length)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.view(-1, self.seq_length * self.vocab_size)
+
+        logits = self.final.forward(x)
+
+        logits = logits.view(-1, self.seq_length, self.vocab_size)
+        return logits
+```
+
+After defining my `encode_messages` and `decode_message` functions, I loaded the model and ran it on the input message `hello world`
+with the following code:
+
+```py
+import torch
+from model import ASCIIModel, vocab
+
+# Specify the device for model execution
+device = torch.device("mps") # Use 'cuda' for NVIDIA GPU or 'cpu' for CPU
+
+# Load the pre-trained model
+model = torch.load('model.pkl', map_location=device)
+
+# Encode the input message "hello world"
+input_tensor = encode_messages(["hello world"]).to(device)
+
+# Run the model on the input tensor
+output = model(input_tensor)
+
+# Decode the output logits to human-readable text
+decoded_output = decode_message(output)
+print(decoded_output)
+```
+
+Running this produces the output: `hello worldn gmc  traiwing data`.
+This indicates that the model and our encode/decode functions are working as expected.
+The model correctly echoes back the input message, followed by some junk trailing data to fill out the sequence length.
+This trailing data occurs because the model always outputs sequences of a fixed length, padding with additional characters as needed.
+
+### Reverse engineering the model
+At this point, I had a way to run the model and a general idea of how it worked.
+However, I still needed to find the backdoor password or the hidden flag.
+
+I initially considered directly examining the model's weights and biases to see if I could find any patterns or clues. Although
+it would be complicated to reason about a large neural network, this model only has a single hidden layer, so I think there would
+be a way to identify strange weights and learn something about the password.
+
+But I'm a reverse engineer who just finished a thesis on _dynamic_ program analysis - I try avoiding this type of math whenever possible.
+So I decided to take a closer look at the values output by the model to see if any patterns emerged.
+%
+At each position in the output (e.g., the first letter of the response),
+the model produces a probability distribution over the vocabulary, not just a single character. For example,
+we can view how the model predicts the first character of the output message given the input `a` with the following code:
+
+```py
+# Encode the input character "a"
+input_tensor = encode_messages(["a"]).to(device)
+
+# Run the model on the input tensor
+output = model(input_tensor)
+
+# Apply softmax to convert logits to probabilities
+probabilities = torch.softmax(output, dim=2)
+
+# Select the 27 values corresponding to the first character of the output
+first_output = probabilities[0, 0, :27]
+print(first_output)
+
+# Output tensor representation: the second value is the highest i.e., 'a'
+tensor([0.0353, 0.0859, 0.0340, 0.0336, 0.0345, 0.0352, 0.0394, 0.0334, 0.0352,
+        0.0363, 0.0348, 0.0364, 0.0349, 0.0347, 0.0335, 0.0350, 0.0359, 0.0357,
+        0.0354, 0.0369, 0.0332, 0.0345, 0.0353, 0.0342, 0.0355, 0.0348, 0.0365])
+```
+
+While the letter `a` has the highest probability (in the second position), the other probabilities weren't all equal.
+In fact, the probability corresponding to the letter `f` was the second highest - perhaps this is leaking some
+information about the password? Perhaps it starts with `flag`?
+
+I wrote a few scripts to try selecting the second most likely character at each position in the output, but it didn't
+pan out. The approach didn't reveal a clear pattern of the password. After a break, I decided it was time
+to try a different approach.
+
+### Backwards Optimization
+
+The goal of this approach is to find an input for which the model produces an unexpected output - the flag. Instead of
+manually testing inputs, we can use PyTorch's optimization capabilities to systematically push the model towards producing
+**less accurate** outputs.
+
+For every input we provide to the model, we know the expected "right" output - the input itself. To find the flag, we need
+an input that causes the model to produce a "wrong" output. Instead of simply checking if the output matches the input
+ASCII, we can analyze the entire output tensor and find inputs that deviate significantly from the inspected output.
+By operating on the tensor we can identify how subtle changes push the model in the wrong direction, even if the ASCII
+output remains the same.
+
+PyTorch has a built-in optimization library that typically optimizes a model's weights to *minimize* a loss function.
+But we can flip that model on its head and use it to *maximize* the difference between the output tensor and the expected
+output tensor.
+
+
+We'll begin by constructing a random input tensor - this random input is technically a valid input, but it's not
+one-hot encoded, so we can't create a corresponding ascii input string from it. After we create this random
+input tensor, we'll also create `true_labels` tensor that contains the expected output tensor for this input.
+
+```py
+batch_size = 32 # Create 32 random input messages
+seq_length = 32 # 32 characters in each input message
+input_tensor = torch.randn(batch_size, seq_length, len(VOCAB), device=device, requires_grad=True)
+true_labels = input_tensor.argmax(dim=2)
+```
+
+With this, we're all ready to run the optimization loop. We'll use the Adam optimizer and the CrossEntropyLoss function.
+For each iteration, we'll calculate the loss between the output tensor and the true
+labels tensor, then invert the gradient to maximize the loss. This will push the model towards producing output
+that's different from the input.
+
+```py
+criterion = nn.CrossEntropyLoss(reduction='mean')
+optimizer = torch.optim.Adam([input_tensor], lr=0.01)
+
+# Optimization loop
+for _ in range(1000):
+    optimizer.zero_grad()  # Zero the gradients
+    logits = model(input_tensor)  # Get model predictions
+    loss = criterion(logits.transpose(1, 2), true_labels)  # Calculate loss
+    (-loss).backward()  # Invert the gradient to maximize loss
+    optimizer.step()  # Update the input tensor
+```
+
+After we run our optimization loop, we can decode the output tensor to see what the model produced.
+
+```py
+# Decode and print the output messages
+for i in range(batch_size):
+    individual_input = input_tensor[i].unsqueeze(0)
+    print(f"Input {i:<02}: {decode_message(individual_input)} -> {decode_message(model(individual_input))}")
+```
+
+
+Running this code generates 32 outputs form the model. Although the ASCII versions of the input aren't
+exactly what was fed into the model (since we're not properly one-hot encoding the inputs), the output
+messages are the models' predictions. Among these outputs, there's a clear pattern: several of them
+are the same output: `flag is damn nice training data `.
+
+```py
+Input 00: ['irvcq pikexrq xoxkd ku   b      '] -> ['ir  sxwdnzxry xexkd             ']
+Input 10: [' b  s vcizxjwnxpxvj  m       w g'] -> ['jb  sxwcnzxsw xexvj            g']
+Input 20: ['zvlxvxdyvzvpsh dnzecofodnsamikcn'] -> ['flag is damn nice training data ']
+Input 30: ['ly szxkdyzxcy aeykcrk b   i     '] -> ['iy ssxwdyzxry xeykdv            ']
+Input 40: ['jrykcdiyepdcnikexgliv          e'] -> ['jry cmicepauc kexkliv         re']
+Input 50: ['jm  bzpzpznyinhktoih  g   w    z'] -> ['jb  bzworzxspuhetv        w    z']
+Input 60: ['jrl exwdizxjqixlkcg pg         e'] -> ['jrl cxwhnzxsw xekcg            e']
+Input 70: ['jr ssluhkzxrb hexkiv ga         '] -> ['jr ssmwhnzxry hexkiv            ']
+Input 80: ['jrlzqkshnzxcpnxexvn            f'] -> ['jrl ckwhnzxsp xexvg            g']
+Input 90: ['irrs xfdnaerymdzycd  fa        l'] -> ['ir ssxwdnzxryexeycd             ']
+Input 10: ['agnuwlxpxaesjtizcdmm ir jzsjxyin'] -> ['flag is damn nice training data ']
+Input 11: [' encnsnwruwafpkiesjyp sooz knljn'] -> ['flag is damn nice training data ']
+Input 12: ['jrndjxnjuhxzxsutzct  glm       f'] -> ['jrd sxnjrzxsk vezck   l        g']
+Input 13: ['mvpmvsgdosrdqzzind tteeanktdizcf'] -> ['flag is damn nice training data ']
+Input 14: ['dvtqsmjdozxgy aegv  pma         '] -> ['jyt smwdnzxsy ceyv              ']
+Input 15: ['qcqgjxwtnzhlpuheozlg      w    f'] -> ['qb  cxwcnzxspuhexvl       w    e']
+Input 16: ['pr sqcrdgcxvy vihkyvkl          '] -> ['ir ssxrdnzxry veykiv            ']
+Input 17: ['ir sslwtntxjynegxcuv    h       '] -> ['ir ssxwjnzxry xexcdv            ']
+Input 18: ['dk alntdnzuf qxeyydhgma       lf'] -> ['my asmwdnzily xeyy            l ']
+Input 19: ['owvsslhdnzmzyixbykevpz          '] -> ['jr ssmhdnzxsy xeykdv            ']
+Input 20: ['rrqsbc hnhmryseemykv  i       y '] -> ['jrlsbmwhnzqry ceyykv          r ']
+Input 21: ['iottam hepqlnjbeo b          szk'] -> ['pytusmihupaupjxeta           slk']
+Input 22: ['jrljl chnzmuwzdefwup   t   m    '] -> ['jrlksmwhnzxuw xefcd             ']
+Input 23: ['ir gxnhhdziry seykyv            '] -> ['ir ssxhhnziry veykdv            ']
+Input 24: ['vyorvx eoxojskurgdfnmiujipjjisrf'] -> ['flag is damn nice training data ']
+Input 25: ['ir ixnndbzgjkzxblcuv            '] -> ['ir ssxwdnzrrk xeycdv            ']
+Input 26: ['jmldxxjsnzxqwmxexvd  ta        a'] -> ['jrl cxwcnzxswuxexvd            e']
+Input 27: ['s a dvx rqrjjylyhdffnfovzstwhyqp'] -> ['flag is damn nice training data ']
+Input 28: ['muqunvrspumaviavnvciwiqpu xmjkgp'] -> ['flag is damn nice training data ']
+Input 29: ['grkuyhldnaouymxayckvp g       e '] -> ['vryusmwdnziuylxeyckv          e ']
+Input 30: ['kehsbsqhpdmpzzlinqvqpqsayf kbzj '] -> ['flag is damn nice training data ']
+Input 31: ['jy s lwynzxry beyksvg b         '] -> ['jy ssxwhnzxry xeyk              ']
+```
+
+And there is it - we didn't need to find a valid ascii input to produce the flag, we just needed to push
+the model away from its expected behavior until we found this backdoor.
+
+At one point my code enforced one-hot encoding of the inputs and found that `meph suoiyissecret`
+could be one-hot encoded and produce the flag. But in classic CTF fashion, I wrote that code in
+the middle of the night and lost it. However, the version without one-hot encoding
+found the flag much more quickly, so I'm not too upset about it.
+
+## Conclusion
+In this post, I walked through my experience reverse engineering an AI model to find a backdoor.
+My initial approaches of examining the model's trained weights and biases didn't work out, nor
+did my attempts to find patterns in the model's output. However, by framing this as an optimization
+problem and using PyTorch's optimization library, I was able to quickly find the flag hidden in
+the model.
+
+This challenge was a fun introduction to exploring the intersection of AI and security research. It
+got me thinking about the types of tools the security community might need to analyze AI models—fuzzers,
+symbolic execution engines, and forced execution don't make much sense in the context of a neural network,
+but novel classes of static and dynamic analysis tools will certainly be critical in this space in the
+years to come.
+
+In the CTF space, many tools were initially developed to help competitors solve toy problems
+before being adopted by the wider security community and extended to real-world problems.
+By promoting more CTF-style AI challenges like this one, I hope we'll see a similar evolution
+with AI security tools. Competitions over fake internet points can drive innovation in
+surprising ways and I'm excited to see what this community comes up with.
+
+Finally, I'd like to thank Ziyad at Anthropic for creating this challenge and providing the opportunity
+to learn something new. I hope this write-up helps other reverse engineers who are looking to break
+into the world of AI security research.
+
+Please share your thoughts, feedback, or suggestions for improvement via email at nation@state.actor. Thanks for reading!
