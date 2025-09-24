@@ -1,16 +1,23 @@
+/* Additional blog-specific styling */
 hr {
   margin-top: 30px;
   margin-bottom: 20px;
+  border: none;
+  border-top: 1px solid #e0e0e0;
 }
 
 /* Post navigation links */
 .post_navi {
   display: flex;
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid #e0e0e0;
 }
 
 .post_navi-label {
   font-size: 0.8em;
   opacity: 0.5;
+  color: #6c757d;
 }
 
 .post_navi .post_navi-item {
@@ -42,4 +49,55 @@ hr {
   transform: translateY(-50%);
   font-size: 2.5em;
   opacity: 0.3;
+  color: #007bff;
+}
+
+/* Share links styling */
+.share-links {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 5px;
+  border-left: 3px solid #007bff;
+}
+
+/* Comments section */
+.utterances {
+  margin-top: 3rem;
+}
+
+/* Ensure consistent styling with main site */
+.post-content blockquote {
+  border-left: 4px solid #007bff;
+  margin: 1.5em 0;
+  padding-left: 1rem;
+  font-style: italic;
+  color: #666;
+}
+
+.post-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5em 0;
+}
+
+.post-content th, .post-content td {
+  border: 1px solid #e0e0e0;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.post-content th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+/* Image styling */
+.post-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 5px;
+  margin: 1.5em 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }

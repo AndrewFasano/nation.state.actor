@@ -1,0 +1,36 @@
+---
+layout: default
+---
+
+<h1>{{ site.title | escape }}</h1>
+
+<div style="margin-bottom: 2rem;">
+  {{ content }}
+</div>
+
+{%- if site.posts.size > 0 -%}
+  <h2>Recent Posts</h2>
+  <ul class="post-list">
+    {%- for post in site.posts -%}
+    <li>
+      <h3>
+        <a href="{{ post.url | relative_url }}">
+          {{ post.title | escape }}
+        </a>
+      </h3>
+      <p class="post-meta">
+        <time datetime="{{ post.date | date_to_xmlschema }}">
+          {%- assign date_format = site.minima.date_format | default: "%b %-d, %Y" -%}
+          {{ post.date | date: date_format }}
+        </time>
+        {%- if post.author -%}
+          • {{ post.author }}
+        {%- endif -%}
+      </p>
+      {%- if post.excerpt -%}
+        <div>{{ post.excerpt }}</div>
+      {%- endif -%}
+    </li>
+    {%- endfor -%}
+  </ul>
+{%- endif -%}
