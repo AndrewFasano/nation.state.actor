@@ -2,16 +2,16 @@
 layout: default
 ---
 
-<header style="text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 3px solid #007bff;">
+<header style="text-align: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 3px solid #007bff;">
   <h1 style="font-size: 2.5em; margin-bottom: 10px;">{{ site.title | escape }}</h1>
-  <div style="margin-bottom: 1.5rem; color: #666; font-style: italic;">
+  <div style="margin-bottom: 0.5rem; color: #666; font-style: italic;">
     {{ content }}
   </div>
 </header>
 
 {%- if site.posts.size > 0 -%}
   <section>
-    <h2 style="margin-bottom: 2rem;">Latest Posts</h2>
+    <h2 style="margin-bottom: 1rem;">Latest Posts</h2>
     <ul class="post-list">
       {%- for post in site.posts -%}
       <li>

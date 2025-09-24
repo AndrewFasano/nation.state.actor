@@ -1,4 +1,9 @@
 /* Additional blog-specific styling */
+
+/* Reduce excessive spacing between posts */
+.post-list > li {
+  margin-bottom: 20px !important;
+}
 hr {
   margin-top: 30px;
   margin-bottom: 20px;
